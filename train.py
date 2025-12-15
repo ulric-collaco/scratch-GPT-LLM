@@ -1,3 +1,5 @@
+import time
+
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -49,7 +51,10 @@ criterion = nn.CrossEntropyLoss()
 # ------------------
 model.train()
 
+start_time = time.time()
+
 for epoch in range(epochs):
+    epoch_start = time.time()
     total_loss = 0
 
     for x, y in loader:
@@ -71,4 +76,11 @@ for epoch in range(epochs):
         total_loss += loss.item()
 
     avg_loss = total_loss / len(loader)
-    print(f"Epoch {epoch+1} | Loss: {avg_loss:.4f}")
+    epoch_time = time.time() - epoch_start
+    print(f"Epoch {epoch+1} | Loss: {avg_loss:.4f} | Time: {epoch_time:.2f}s")
+
+total_time = time.time() - start_time
+print(f"Total training time: {total_time:.2f}s")
+
+torch.save(model.state_dict(), "gpt_char_model.pt")
+print("Saved model to gpt_char_model.pt")

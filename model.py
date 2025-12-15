@@ -132,6 +132,25 @@ class GPT(nn.Module):
         self.ln_f = nn.LayerNorm(embed_dim)
         self.head = nn.Linear(embed_dim, vocab_size)
 
+    @torch.no_grad()
+    def generate(self, idx, max_new_tokens, temperature=1.0):
+        self.eval()
+
+        for _ in range(max_new_tokens):
+            # keep last seq_len tokens
+            idx_cond = idx[:, -self.embed.position_embedding.num_embeddings:]
+
+            logits = self(idx_cond)          # (B, T, vocab)
+            logits = logits[:, -1, :]        # last token
+            logits = logits / temperature
+
+            probs = torch.softmax(logits, dim=-1)
+            next_id = torch.multinomial(probs, num_samples=1)
+
+            idx = torch.cat([idx, next_id], dim=1)
+
+        return idx
+
     def forward(self, x):
         x = self.embed(x)
 
