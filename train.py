@@ -17,7 +17,7 @@ embed_dim = 64
 num_heads = 4
 num_layers = 2
 lr = 3e-4
-epochs = 5
+epochs = 15
 device = "cuda" 
 
 # ------------------
@@ -77,10 +77,12 @@ for epoch in range(epochs):
 
     avg_loss = total_loss / len(loader)
     epoch_time = time.time() - epoch_start
-    print(f"Epoch {epoch+1} | Loss: {avg_loss:.4f} | Time: {epoch_time:.2f}s")
+    epoch_mins = epoch_time / 60
+    print(f"Epoch {epoch+1} | Loss: {avg_loss:.4f} | Time: {epoch_mins:.2f} min")
 
 total_time = time.time() - start_time
-print(f"Total training time: {total_time:.2f}s")
+total_mins = total_time / 60
+print(f"Total training time: {total_mins:.2f} min")
 
 torch.save(model.state_dict(), "gpt_char_model.pt")
 print("Saved model to gpt_char_model.pt")
