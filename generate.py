@@ -23,7 +23,7 @@ model = GPT(
 model.load_state_dict(torch.load("gpt_char_model.pt", map_location=device))
 
 # starting prompt
-prompt = ""
+prompt = "but the bullock"
 idx = torch.tensor([tokenizer.encode(prompt)], device=device)
 
 # generate

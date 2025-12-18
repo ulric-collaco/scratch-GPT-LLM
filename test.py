@@ -8,9 +8,9 @@ def load_text(path):
         return f.read()
 
 def clean_text(text):
-    text = text.lower()
     text = re.sub(r'\s+', ' ', text)
     return text
+
 
 def split_text(text, split_ratio=0.9):
     n = int(len(text) * split_ratio)
