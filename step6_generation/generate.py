@@ -1,7 +1,13 @@
 import pickle
+import sys
 from pathlib import Path
 
 import torch
+
+# Allow running this file directly: `python step6_generation/generate.py`
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from step2_tokenizer.tokenizer import CharTokenizer
 from step4_model.gpt import GPT

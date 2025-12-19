@@ -1,4 +1,12 @@
 import torch
+import sys
+from pathlib import Path
+
+# Allow running this file directly: `python tests/unit_tests/test_gpt.py`
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from step4_model.gpt import GPT
 from step2_tokenizer.tokenizer import CharTokenizer
 from step3_dataset.dataset import TextDataset
