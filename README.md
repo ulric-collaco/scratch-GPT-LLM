@@ -1,6 +1,6 @@
 # From-scratch Character-level GPT (PyTorch)
 
-This repo is organized as a **step-by-step college ML project** (aimed at a 2nd-year engineering student). Each folder is one phase in the pipeline, from raw text to a trained character-level GPT and a small generation script.
+ Each folder is one phase in the pipeline, from raw text to a trained character-level GPT and a small generation script.
 
 ## Folder structure
 
