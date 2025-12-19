@@ -19,6 +19,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from step2_tokenizer.tokenizer import CharTokenizer
 from step3_dataset.dataset import TextDataset
+from step3_dataset.stream_dataset import StreamingBatchLoader
+from step1_data_prep.parquet_stream import scan_parquet_for_charset_and_count
 from step4_model.gpt import GPT
 
 
@@ -57,6 +59,30 @@ def main() -> None:
         "--resume",
         action="store_true",
         help="Resume training from the latest checkpoint in checkpoints/.",
+    )
+    # ------------------
+    # Optional: Parquet streaming input (professional-style data pipeline)
+    # ------------------
+    parser.add_argument(
+        "--parquet",
+        action="append",
+        default=None,
+        help=(
+            "Path to a .parquet file or a directory containing parquet files. "
+            "Can be provided multiple times. If omitted, uses data/cleaned/train.txt."
+        ),
+    )
+    parser.add_argument(
+        "--text-column",
+        type=str,
+        default="text",
+        help='Text column name in Parquet (default: "text").',
+    )
+    parser.add_argument(
+        "--parquet-batch-size",
+        type=int,
+        default=1024,
+        help="Number of rows per Parquet batch read (default: 1024).",
     )
     args = parser.parse_args()
 
@@ -109,22 +135,50 @@ def main() -> None:
     # ------------------
     # data
     # ------------------
-    train_path = project_root / "data" / "cleaned" / "train.txt"
-    with train_path.open("r", encoding="utf-8") as f:
-        train_text = f.read()
+    # Two supported modes:
+    # 1) Default (simple): read data/cleaned/train.txt and tokenize in-memory.
+    # 2) Streaming Parquet (professional-style): Parquet -> stream text -> tokenize on-the-fly -> batches.
+    if args.parquet:
+        # --- Parquet streaming mode ---
+        # 1) Scan once to build vocab + count chars (still streaming, no full dataset in memory).
+        scan = scan_parquet_for_charset_and_count(
+            args.parquet,
+            text_column=args.text_column,
+            batch_size=args.parquet_batch_size,
+        )
+        # CharTokenizer expects a "text" string; providing all unique chars once is enough.
+        tokenizer = CharTokenizer("".join(sorted(scan.chars)))
 
-    tokenizer = CharTokenizer(train_text)
-    train_tokens = tokenizer.encode(train_text)
+        # MLOps: persist tokenizer
+        with tokenizer_path.open("wb") as f:
+            pickle.dump(tokenizer, f)
 
-    # ------------------
-    # MLOps: persist tokenizer
-    # ------------------
-    # Requirement: Save tokenizer object to tokenizer.pkl
-    with tokenizer_path.open("wb") as f:
-        pickle.dump(tokenizer, f)
+        # 2) Build a loader-like object that yields (x,y) batches and supports len(loader)
+        # so the training loop can stay unchanged.
+        loader = StreamingBatchLoader(
+            args.parquet,
+            tokenizer=tokenizer,
+            seq_len=seq_len,
+            batch_size=batch_size,
+            total_tokens=scan.total_chars,  # 1 char == 1 token in CharTokenizer
+            text_column=args.text_column,
+            parquet_batch_size=args.parquet_batch_size,
+        )
+    else:
+        # --- Text file mode ---
+        train_path = project_root / "data" / "cleaned" / "train.txt"
+        with train_path.open("r", encoding="utf-8") as f:
+            train_text = f.read()
 
-    dataset = TextDataset(train_tokens, seq_len)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        tokenizer = CharTokenizer(train_text)
+        train_tokens = tokenizer.encode(train_text)
+
+        # MLOps: persist tokenizer
+        with tokenizer_path.open("wb") as f:
+            pickle.dump(tokenizer, f)
+
+        dataset = TextDataset(train_tokens, seq_len)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     # ------------------
     # model (keep architecture unchanged)

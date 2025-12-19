@@ -1,1 +1,57 @@
+# ==============================
+# Python (bytecode / caches)
+# ==============================
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ==============================
+# Virtual environments
+# ==============================
+.venv/
+venv/
+env/
+
+# ==============================
+# OS / editor junk
+# ==============================
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# VS Code
+.vscode/
+
+# JetBrains
+.idea/
+
+# ==============================
+# Project outputs (models/logs)
+# ==============================
+# Checkpoints + saved weights
+checkpoints/
+step5_training/*.pt
 *.pt
+
+# Training artifacts
+step5_training/config.json
+step5_training/training_log.csv
+step5_training/tokenizer.pkl
+
+# Optional: keep parquet data out of git by default
+*.parquet
+
+# ==============================
+# Temporary / scratch files
+# ==============================
+tempCodeRunnerFile.py
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
