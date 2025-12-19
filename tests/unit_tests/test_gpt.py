@@ -1,9 +1,9 @@
 import torch
-from model import GPT
-from tokenizer import CharTokenizer
-from dataset import TextDataset
+from step4_model.gpt import GPT
+from step2_tokenizer.tokenizer import CharTokenizer
+from step3_dataset.dataset import TextDataset
 
-with open("data/train.txt", "r", encoding="utf-8") as f:
+with open("data/cleaned/train.txt", "r", encoding="utf-8") as f:
     text = f.read()
 
 tokenizer = CharTokenizer(text)
