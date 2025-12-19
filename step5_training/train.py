@@ -19,8 +19,12 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from step2_tokenizer.tokenizer import CharTokenizer
 from step3_dataset.dataset import TextDataset
-from step3_dataset.stream_dataset import StreamingBatchLoader
-from step1_data_prep.parquet_stream import scan_parquet_for_charset_and_count
+from step3_dataset.stream_dataset import StreamingTokenBatchLoader
+from step1_data_prep.hf_loader import scan_hf_for_charset_and_count, stream_token_ids_from_hf
+from step1_data_prep.parquet_stream import (
+    scan_parquet_for_charset_and_count,
+    stream_token_ids_from_parquet,
+)
 from step4_model.gpt import GPT
 
 
@@ -59,30 +63,6 @@ def main() -> None:
         "--resume",
         action="store_true",
         help="Resume training from the latest checkpoint in checkpoints/.",
-    )
-    # ------------------
-    # Optional: Parquet streaming input (professional-style data pipeline)
-    # ------------------
-    parser.add_argument(
-        "--parquet",
-        action="append",
-        default=None,
-        help=(
-            "Path to a .parquet file or a directory containing parquet files. "
-            "Can be provided multiple times. If omitted, uses data/cleaned/train.txt."
-        ),
-    )
-    parser.add_argument(
-        "--text-column",
-        type=str,
-        default="text",
-        help='Text column name in Parquet (default: "text").',
-    )
-    parser.add_argument(
-        "--parquet-batch-size",
-        type=int,
-        default=1024,
-        help="Number of rows per Parquet batch read (default: 1024).",
     )
     args = parser.parse_args()
 
@@ -135,50 +115,74 @@ def main() -> None:
     # ------------------
     # data
     # ------------------
-    # Two supported modes:
-    # 1) Default (simple): read data/cleaned/train.txt and tokenize in-memory.
-    # 2) Streaming Parquet (professional-style): Parquet -> stream text -> tokenize on-the-fly -> batches.
-    if args.parquet:
-        # --- Parquet streaming mode ---
-        # 1) Scan once to build vocab + count chars (still streaming, no full dataset in memory).
+    # Default mode: Hugging Face streaming (automatic download).
+    # Manual mode (opt-in): if you drop any *.parquet files into data/raw/, use local Parquet streaming.
+    parquet_dir = project_root / "data" / "raw"
+    local_parquets = sorted(parquet_dir.glob("*.parquet"))
+
+    if local_parquets:
+        # --- Manual mode: Local Parquet streaming ---
+        # Text column defaults to "text" for common HF parquet exports.
+        text_column = "text"
+        parquet_batch_size = 1024
+
         scan = scan_parquet_for_charset_and_count(
-            args.parquet,
-            text_column=args.text_column,
-            batch_size=args.parquet_batch_size,
+            local_parquets,
+            text_column=text_column,
+            batch_size=parquet_batch_size,
         )
-        # CharTokenizer expects a "text" string; providing all unique chars once is enough.
         tokenizer = CharTokenizer("".join(sorted(scan.chars)))
 
-        # MLOps: persist tokenizer
         with tokenizer_path.open("wb") as f:
             pickle.dump(tokenizer, f)
 
-        # 2) Build a loader-like object that yields (x,y) batches and supports len(loader)
-        # so the training loop can stay unchanged.
-        loader = StreamingBatchLoader(
-            args.parquet,
-            tokenizer=tokenizer,
+        def _token_iter_factory():
+            return stream_token_ids_from_parquet(
+                local_parquets,
+                tokenizer=tokenizer,
+                text_column=text_column,
+                parquet_batch_size=parquet_batch_size,
+            )
+
+        loader = StreamingTokenBatchLoader(
+            token_iter_factory=_token_iter_factory,
             seq_len=seq_len,
             batch_size=batch_size,
-            total_tokens=scan.total_chars,  # 1 char == 1 token in CharTokenizer
-            text_column=args.text_column,
-            parquet_batch_size=args.parquet_batch_size,
+            total_tokens=scan.total_chars,
         )
     else:
-        # --- Text file mode ---
-        train_path = project_root / "data" / "cleaned" / "train.txt"
-        with train_path.open("r", encoding="utf-8") as f:
-            train_text = f.read()
+        # --- Default mode: Hugging Face streaming ---
+        hf_dataset_name = "wikitext"
+        hf_dataset_config = "wikitext-103-raw-v1"
+        hf_split = "train"
+        hf_text_column = "text"
 
-        tokenizer = CharTokenizer(train_text)
-        train_tokens = tokenizer.encode(train_text)
+        scan = scan_hf_for_charset_and_count(
+            dataset_name=hf_dataset_name,
+            dataset_config=hf_dataset_config,
+            split=hf_split,
+            text_column=hf_text_column,
+        )
+        tokenizer = CharTokenizer("".join(sorted(scan.chars)))
 
-        # MLOps: persist tokenizer
         with tokenizer_path.open("wb") as f:
             pickle.dump(tokenizer, f)
 
-        dataset = TextDataset(train_tokens, seq_len)
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        def _token_iter_factory():
+            return stream_token_ids_from_hf(
+                tokenizer=tokenizer,
+                dataset_name=hf_dataset_name,
+                dataset_config=hf_dataset_config,
+                split=hf_split,
+                text_column=hf_text_column,
+            )
+
+        loader = StreamingTokenBatchLoader(
+            token_iter_factory=_token_iter_factory,
+            seq_len=seq_len,
+            batch_size=batch_size,
+            total_tokens=scan.total_chars,
+        )
 
     # ------------------
     # model (keep architecture unchanged)

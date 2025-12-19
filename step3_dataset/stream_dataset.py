@@ -16,11 +16,75 @@ from __future__ import annotations
 import math
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Deque, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
 
 import torch
 
 from step1_data_prep.parquet_stream import PathLike, stream_token_ids_from_parquet
+
+
+class StreamingTokenBatchLoader:
+    """Generic streaming batch loader for a stream of token IDs.
+
+    This class exists so the training loop can stay unchanged:
+    - it yields (x, y) tensors shaped like a normal DataLoader batch
+    - it supports __len__ so avg_loss computation works
+
+    It can be used for Hugging Face streaming *or* local Parquet streaming.
+    """
+
+    def __init__(
+        self,
+        *,
+        token_iter_factory: Callable[[], Iterator[int]],
+        seq_len: int,
+        batch_size: int,
+        total_tokens: int,
+    ) -> None:
+        self.token_iter_factory = token_iter_factory
+        self.seq_len = int(seq_len)
+        self.batch_size = int(batch_size)
+        self.total_tokens = int(total_tokens)
+
+        self.total_samples = max(0, self.total_tokens - self.seq_len)
+        self.total_batches = (
+            int(math.ceil(self.total_samples / self.batch_size)) if self.total_samples else 0
+        )
+
+    def __len__(self) -> int:
+        return self.total_batches
+
+    def __iter__(self) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:
+        token_iter = self.token_iter_factory()
+
+        window: Deque[int] = deque(maxlen=self.seq_len + 1)
+        batch_x: List[torch.Tensor] = []
+        batch_y: List[torch.Tensor] = []
+
+        samples_emitted = 0
+
+        for token_id in token_iter:
+            window.append(int(token_id))
+            if len(window) < self.seq_len + 1:
+                continue
+
+            x = torch.tensor(list(window)[: self.seq_len], dtype=torch.long)
+            y = torch.tensor(list(window)[1 : self.seq_len + 1], dtype=torch.long)
+
+            batch_x.append(x)
+            batch_y.append(y)
+            samples_emitted += 1
+
+            if len(batch_x) == self.batch_size:
+                yield torch.stack(batch_x, dim=0), torch.stack(batch_y, dim=0)
+                batch_x.clear()
+                batch_y.clear()
+
+            if samples_emitted >= self.total_samples:
+                break
+
+        if batch_x:
+            yield torch.stack(batch_x, dim=0), torch.stack(batch_y, dim=0)
 
 
 class StreamingBatchLoader:
