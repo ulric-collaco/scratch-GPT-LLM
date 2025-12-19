@@ -1,7 +1,6 @@
 import argparse
 import csv
 import json
-import os
 import pickle
 import re
 import time
@@ -12,9 +11,9 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from tokenizer import CharTokenizer
-from dataset import TextDataset
-from model import GPT
+from step2_tokenizer.tokenizer import CharTokenizer
+from step3_dataset.dataset import TextDataset
+from step4_model.gpt import GPT
 
 
 def _ensure_dir(path: Path) -> None:
@@ -45,6 +44,7 @@ def _latest_checkpoint(checkpoints_dir: Path) -> Tuple[Optional[Path], int]:
 
     return best_path, best_epoch
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train a from-scratch character-level GPT.")
     parser.add_argument(
@@ -55,7 +55,7 @@ def main() -> None:
     args = parser.parse_args()
 
     # ------------------
-    # config
+    # config (keep the same hyperparameters)
     # ------------------
     seq_len = 32
     batch_size = 32
@@ -65,20 +65,28 @@ def main() -> None:
     lr = 3e-4
     epochs = 15
 
-    # (Not part of the requested MLOps features, but makes the script runnable on CPU.)
+    # Keep script runnable on CPU as well.
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # ------------------
-    # MLOps: output paths
+    # MLOps: project-relative paths
     # ------------------
-    checkpoints_dir = Path("checkpoints")
+    # This makes the script runnable from any working directory.
+    project_root = Path(__file__).resolve().parents[1]
+
+    checkpoints_dir = project_root / "checkpoints"
     _ensure_dir(checkpoints_dir)
-    config_path = Path("config.json")
-    log_path = Path("training_log.csv")
-    tokenizer_path = Path("tokenizer.pkl")
+
+    artifacts_dir = project_root / "step5_training"
+    _ensure_dir(artifacts_dir)
+
+    config_path = artifacts_dir / "config.json"
+    log_path = artifacts_dir / "training_log.csv"
+    tokenizer_path = artifacts_dir / "tokenizer.pkl"
+    final_model_path = artifacts_dir / "gpt_char_model.pt"
 
     # ------------------
-    # MLOps: persist training configuration
+    # MLOps: persist training configuration (at training start)
     # ------------------
     config = {
         "seq_len": seq_len,
@@ -89,14 +97,14 @@ def main() -> None:
         "batch_size": batch_size,
         "epochs": epochs,
     }
-    # Save at training start (overwrite is fine; it reflects the run's config).
     with config_path.open("w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
 
     # ------------------
     # data
     # ------------------
-    with open("data/train.txt", "r", encoding="utf-8") as f:
+    train_path = project_root / "data" / "cleaned" / "train.txt"
+    with train_path.open("r", encoding="utf-8") as f:
         train_text = f.read()
 
     tokenizer = CharTokenizer(train_text)
@@ -105,7 +113,7 @@ def main() -> None:
     # ------------------
     # MLOps: persist tokenizer
     # ------------------
-    # Pickle is sufficient here because tokenizer.py is part of this codebase.
+    # Requirement: Save tokenizer object to tokenizer.pkl
     with tokenizer_path.open("wb") as f:
         pickle.dump(tokenizer, f)
 
@@ -113,7 +121,7 @@ def main() -> None:
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     # ------------------
-    # model
+    # model (keep architecture unchanged)
     # ------------------
     model = GPT(
         vocab_size=tokenizer.vocab_size,
@@ -129,7 +137,7 @@ def main() -> None:
     # ------------------
     # MLOps: resume training from latest checkpoint
     # ------------------
-    start_epoch = 0  # 0-based "completed epochs" counter; training loop below uses 1..epochs
+    start_epoch = 0  # completed epochs; training loop below uses 1..epochs
     if args.resume:
         ckpt_path, ckpt_epoch = _latest_checkpoint(checkpoints_dir)
         if ckpt_path is None:
@@ -142,7 +150,7 @@ def main() -> None:
     # ------------------
     # MLOps: loss logging setup
     # ------------------
-    # Append mode so resume continues logging.
+    # Requirement: Save loss per epoch to training_log.csv with columns epoch, loss
     log_needs_header = not log_path.exists()
     log_file = log_path.open("a", newline="", encoding="utf-8")
     log_writer = csv.DictWriter(log_file, fieldnames=["epoch", "loss"])
@@ -150,13 +158,11 @@ def main() -> None:
         log_writer.writeheader()
 
     # ------------------
-    # training loop
+    # training loop (keep logic unchanged)
     # ------------------
     model.train()
-
     start_time = time.time()
 
-    # Train epochs are 1-based for user-friendly filenames/logs.
     for epoch in range(start_epoch + 1, epochs + 1):
         epoch_start = time.time()
         total_loss = 0.0
@@ -181,31 +187,29 @@ def main() -> None:
 
         avg_loss = total_loss / len(loader)
         epoch_time = time.time() - epoch_start
-        epoch_mins = epoch_time / 60
-        print(f"Epoch {epoch} | Loss: {avg_loss:.4f} | Time: {epoch_mins:.2f} min")
+        print(f"Epoch {epoch} | Loss: {avg_loss:.4f} | Time: {epoch_time / 60:.2f} min")
 
         # ------------------
         # MLOps: checkpointing (end of every epoch)
         # ------------------
-        # Requirement: Save model.state_dict() to checkpoints/epoch_{epoch}.pt
+        # Requirement: Save model.state_dict() at end of every epoch
+        # Requirement: checkpoints/epoch_{epoch}.pt
         ckpt_out = checkpoints_dir / f"epoch_{epoch}.pt"
         torch.save(model.state_dict(), ckpt_out)
 
-        # ------------------
-        # MLOps: loss logging (per epoch)
-        # ------------------
+        # MLOps: write training loss per epoch
         log_writer.writerow({"epoch": epoch, "loss": avg_loss})
         log_file.flush()
 
     total_time = time.time() - start_time
-    total_mins = total_time / 60
-    print(f"Total training time: {total_mins:.2f} min")
+    print(f"Total training time: {total_time / 60:.2f} min")
 
-    # Keep your existing "final" model artifact as well.
-    torch.save(model.state_dict(), "gpt_char_model.pt")
-    print("Saved model to gpt_char_model.pt")
+    # Keep a final artifact for convenient inference.
+    torch.save(model.state_dict(), final_model_path)
+    print(f"Saved model to {final_model_path}")
 
     log_file.close()
+
 
 if __name__ == "__main__":
     main()

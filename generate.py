@@ -1,14 +1,23 @@
+import pickle
+
 import torch
 from model import GPT
 from tokenizer import CharTokenizer
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# load text (only for tokenizer)
-with open("data/train.txt", "r", encoding="utf-8") as f:
-    text = f.read()
-
-tokenizer = CharTokenizer(text)
+# ------------------
+# MLOps: load the persisted tokenizer
+# ------------------
+# This ensures inference uses the exact same vocab mapping as training.
+try:
+    with open("tokenizer.pkl", "rb") as f:
+        tokenizer = pickle.load(f)
+except FileNotFoundError:
+    # Fallback for first-time runs (e.g., before training has been executed).
+    with open("data/train.txt", "r", encoding="utf-8") as f:
+        text = f.read()
+    tokenizer = CharTokenizer(text)
 
 # build model
 model = GPT(
